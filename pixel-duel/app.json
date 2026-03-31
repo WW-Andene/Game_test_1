@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Pixel Duel",
+    "slug": "pixel-duel",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0F172A",
+    "android": {
+      "package": "com.yourname.pixelduel",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0F172A"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "backgroundColor": "#0F172A"
+    }
+  }
+}
