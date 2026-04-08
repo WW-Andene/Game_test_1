@@ -29,15 +29,13 @@ HALF_VH  = VIEW_H // 2
 SHADE_STEPS = 6
 
 # ── Palette — Gothic Dungeon ──────────────────────────────────────────────────
-SKY     = (16,  12,  26)   # deep indigo ceiling
-GROUND  = (18,  16,  22)   # dark purple-gray stone floor
-WALL_N  = (62,  58,  74)   # north: cool purple-gray stone
-WALL_S  = (36,  32,  46)   # south: dark shadowed stone
-WALL_E  = (82,  76,  94)   # east:  lighter stone (lit face)
-WALL_W  = (48,  44,  58)   # west:  medium stone
-MORTAR  = (10,   8,  14)   # dark mortar with purple tint
-MOSS_C  = (28,  56,  34)   # dark green moss in crevices
-VINE_C  = (22,  48,  28)   # vine green
+SKY     = (12,  10,  16)   # very dark ceiling
+GROUND  = (20,  18,  16)   # dark warm stone floor
+WALL_N  = (88,  84,  80)   # north: warm gray stone
+WALL_S  = (55,  52,  50)   # south: dark shadowed stone
+WALL_E  = (108, 102,  96)  # east:  lighter stone (lit face)
+WALL_W  = (70,  67,  64)   # west:  medium stone
+MORTAR  = (16,  14,  12)   # very dark mortar
 TORCH_C = (255, 140,  24)  # warm amber torch flame
 GOLD    = (220, 180,  40)  # pixel gold
 RED_LT  = (200,  36,  36)  # deep red
@@ -45,9 +43,139 @@ GREEN   = ( 28, 200,  52)  # vivid green
 GREY    = (100, 102, 116)  # cool gray-purple text
 WHITE   = (215, 218, 228)  # cool near-white
 BLACK   = (  0,   0,   0)
-BTN_BG  = ( 14,  12,  20)  # button background — purple tint
-BTN_BD  = ( 58,  54,  72)  # button border — stone purple-gray
-BTN_HL  = ( 82,  78,  96)  # button highlight
+BTN_BG  = ( 14,  12,  18)  # button background
+BTN_BD  = ( 58,  56,  64)  # button border
+BTN_HL  = ( 82,  80,  88)  # button highlight
+
+# ── Procedural Pixel Art Textures ─────────────────────────────────────────────
+TEX_SIZE = 32
+
+def _phash(n):
+    """Fast deterministic integer hash for procedural generation"""
+    n = ((n ^ 61) ^ (n >> 16)) & 0xFFFFFFFF
+    n = (n + (n << 3)) & 0xFFFFFFFF
+    n = (n ^ (n >> 4)) & 0xFFFFFFFF
+    n = (n * 0x27d4eb2d) & 0xFFFFFFFF
+    return (n ^ (n >> 15)) & 0xFFFF
+
+def generate_wall_texture(base_r, base_g, base_b, seed=0):
+    """Create a 32x32 stone brick texture with mortar, cracks, moss, highlights"""
+    tex = pygame.Surface((TEX_SIZE, TEX_SIZE))
+    mortar_col = (22, 20, 16)
+    tex.fill(mortar_col)
+
+    # Running bond brick layout — 4 rows, alternating offset
+    # Mortar lines: y = 0, 8, 16, 24 (1px horizontal)
+    # Even rows: vertical mortar at x=15
+    # Odd rows:  vertical mortar at x=7 and x=23
+    brick_defs = []
+    for row in range(4):
+        y0 = row * 8 + 1
+        bh = 7
+        if row % 2 == 0:
+            brick_defs.append((0,  y0, 15, bh, _phash(seed + row * 37)))
+            brick_defs.append((16, y0, 16, bh, _phash(seed + row * 37 + 17)))
+        else:
+            brick_defs.append((0,  y0,  7, bh, _phash(seed + row * 37)))
+            brick_defs.append((8,  y0, 15, bh, _phash(seed + row * 37 + 17)))
+            brick_defs.append((24, y0,  8, bh, _phash(seed + row * 37 + 31)))
+
+    for (bx, by, bw, bh, bseed) in brick_defs:
+        var = (bseed % 26) - 13
+        sr = max(15, min(245, base_r + var))
+        sg = max(15, min(245, base_g + var))
+        sb = max(15, min(245, base_b + var))
+
+        for py in range(by, min(by + bh, TEX_SIZE)):
+            for px in range(bx, min(bx + bw, TEX_SIZE)):
+                dx = min(px - bx, bx + bw - 1 - px)
+                dy = min(py - by, by + bh - 1 - py)
+                edge = min(dx, dy)
+                nh = _phash(px * 53 + py * 97 + bseed)
+                noise = (nh % 12) - 6
+
+                if edge == 0:
+                    cr = max(sr - 18 + noise, 0)
+                    cg = max(sg - 18 + noise, 0)
+                    cb = max(sb - 18 + noise, 0)
+                elif edge == 1:
+                    cr = max(0, min(255, sr - 7 + noise))
+                    cg = max(0, min(255, sg - 7 + noise))
+                    cb = max(0, min(255, sb - 7 + noise))
+                else:
+                    cr = max(0, min(255, sr + noise))
+                    cg = max(0, min(255, sg + noise))
+                    cb = max(0, min(255, sb + noise))
+
+                # Occasional bright highlight speck
+                if nh % 28 == 0 and edge > 1:
+                    cr = min(cr + 20, 255)
+                    cg = min(cg + 18, 255)
+                    cb = min(cb + 16, 255)
+
+                tex.set_at((px, py), (cr, cg, cb))
+
+        # Cracks (rare per brick)
+        ch = _phash(bseed * 313)
+        if ch % 6 == 0 and bw > 5:
+            cx = bx + 2 + ch % max(1, bw - 4)
+            for ci in range(min(4, bh - 2)):
+                cy = by + 1 + ci
+                if 0 <= cx < TEX_SIZE and 0 <= cy < TEX_SIZE:
+                    oc = tex.get_at((cx, cy))
+                    tex.set_at((cx, cy),
+                        (max(oc[0]-22, 0), max(oc[1]-22, 0), max(oc[2]-22, 0)))
+                if _phash(cx + ci * 7 + bseed) % 3 == 0:
+                    cx += 1 if _phash(ci * 11 + bseed) % 2 == 0 else -1
+                    cx = max(bx + 1, min(bx + bw - 2, cx))
+
+    # Moss spots — sparse, only in mortar lines
+    for i in range(6):
+        mh = _phash(seed * 100 + i * 77)
+        mx = mh % TEX_SIZE
+        mort_y = [0, 8, 16, 24][mh % 4]
+        moss = (18 + mh % 10, 42 + mh % 18, 14 + mh % 8)
+        tex.set_at((mx, mort_y), moss)
+        if mh % 3 == 0 and mx + 1 < TEX_SIZE:
+            tex.set_at((mx + 1, mort_y), moss)
+        # Moss drip below mortar into brick
+        if mh % 4 == 0 and mort_y + 1 < TEX_SIZE:
+            drip = (moss[0] - 4, max(moss[1] - 8, 0), moss[2] - 2)
+            tex.set_at((mx, mort_y + 1), drip)
+
+    return tex
+
+def make_shaded_textures(tex, steps):
+    """Pre-compute shaded versions at each brightness step"""
+    result = []
+    for s in range(steps + 1):
+        shade_val = s / steps
+        copy = tex.copy()
+        dark = pygame.Surface(tex.get_size())
+        sv = int(255 * shade_val)
+        dark.fill((sv, sv, sv))
+        copy.blit(dark, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
+        result.append(copy)
+    return result
+
+# Pre-generate shaded wall textures (runs once at startup)
+WALL_SHADED = {
+    'N': make_shaded_textures(
+             generate_wall_texture(WALL_N[0], WALL_N[1], WALL_N[2], seed=0),
+             SHADE_STEPS),
+    'S': make_shaded_textures(
+             generate_wall_texture(WALL_S[0], WALL_S[1], WALL_S[2], seed=100),
+             SHADE_STEPS),
+    'E': make_shaded_textures(
+             generate_wall_texture(WALL_E[0], WALL_E[1], WALL_E[2], seed=200),
+             SHADE_STEPS),
+    'W': make_shaded_textures(
+             generate_wall_texture(WALL_W[0], WALL_W[1], WALL_W[2], seed=300),
+             SHADE_STEPS),
+}
+
+# Pre-compute glow overlay column (reused per frame)
+_glow_col_surf = pygame.Surface((1, RH))
 
 # ── Map ───────────────────────────────────────────────────────────────────────
 MAP = [
@@ -285,52 +413,67 @@ def make_buttons():
 # ── draw_view ─────────────────────────────────────────────────────────────────
 def draw_view(surf, player, enemies, zbuf, t):
 
-    # ── Ceiling — dark indigo stone with beam structure ──
-    surf.fill(SKY, (0, 0, RW, HALF_H))
-    # Crossbeam lines on ceiling (perspective-corrected)
-    beam_col = (24, 18, 36)
-    beam_hi  = (30, 24, 44)
-    for bd in [0.7, 1.4, 2.4, 3.8, 6.0, 10.0]:
-        cy = int(HALF_H - (RH - HALF_H) * 0.40 / (bd * 0.5 + 0.001))
-        cy = max(0, min(HALF_H - 1, cy))
-        pygame.draw.line(surf, beam_col, (0, cy), (RW, cy), max(1, 3 - int(bd * 0.3)))
-        if cy + 1 < HALF_H:
-            pygame.draw.line(surf, beam_hi, (0, cy + 1), (RW, cy + 1), 1)
-    # Vertical ceiling beams
-    for vb in range(0, RW, max(4, RW // 8)):
-        pygame.draw.line(surf, beam_col, (vb, 0), (vb, HALF_H // 3), 1)
-    # Subtle purple haze near horizon
-    pygame.draw.rect(surf, (22, 16, 32), (0, HALF_H - HALF_H//5, RW, HALF_H//5))
+    # ── Ceiling — dark stone with perspective gradient ──
+    ceil_bands = 16
+    for ci in range(ceil_bands):
+        cy0 = HALF_H * ci // ceil_bands
+        cy1 = HALF_H * (ci + 1) // ceil_bands
+        # Darker at top, slightly lighter near horizon
+        bright = 0.06 + (ci / ceil_bands) * 0.22
+        # Beam highlight every 4th band
+        if ci % 5 == 0:
+            cr = int(26 * bright)
+            cg = int(22 * bright)
+            cb = int(20 * bright)
+        else:
+            cr = int(SKY[0] * (1.0 + bright))
+            cg = int(SKY[1] * (1.0 + bright))
+            cb = int(SKY[2] * (1.0 + bright))
+        pygame.draw.rect(surf, (min(cr,255), min(cg,255), min(cb,255)),
+                         (0, cy0, RW, max(1, cy1 - cy0)))
 
-    # ── Floor — cobblestone with moss growth ──
-    surf.fill(GROUND, (0, HALF_H, RW, RH - HALF_H))
-    tile_col  = (GROUND[0]+10, GROUND[1]+9, GROUND[2]+12)
-    moss_line = (MOSS_C[0]//2, MOSS_C[1]//2, MOSS_C[2]//2)
-    for row_dist in [0.6, 0.9, 1.3, 1.8, 2.5, 3.4, 4.8, 6.8, 10.0, 15.0]:
-        proj_y = int(HALF_H + (RH - HALF_H) * 0.45 / (row_dist * 0.5 + 0.001))
-        proj_y = min(RH - 1, max(HALF_H + 1, proj_y))
-        pygame.draw.line(surf, tile_col, (0, proj_y), (RW, proj_y), 1)
-        # Moss between floor tiles
-        if proj_y + 1 < RH:
-            pygame.draw.line(surf, moss_line, (0, proj_y + 1), (RW, proj_y + 1), 1)
+    # ── Floor — stone tiles with perspective bands ──
+    floor_bands = 24
+    for fi in range(floor_bands):
+        t0 = fi / floor_bands
+        t1 = (fi + 1) / floor_bands
+        fy0 = int(HALF_H + t0 * (RH - HALF_H))
+        fy1 = int(HALF_H + t1 * (RH - HALF_H))
+        # Closer bands = brighter (inverse distance)
+        dist_approx = 0.5 / (t0 + 0.02)
+        shade_f = max(0.06, min(0.80, 1.0 - dist_approx / MAX_D))
+        # Mortar between every few tile bands
+        is_mortar = (fi % 4 == 0)
+        if is_mortar:
+            fr = int(18 * shade_f)
+            fg = int(16 * shade_f)
+            fb = int(14 * shade_f)
+        else:
+            bh = _phash(fi * 73 + 999)
+            var = (bh % 14) - 7
+            fr = int((62 + var) * shade_f)
+            fg = int((58 + var) * shade_f)
+            fb = int((54 + var) * shade_f)
+        pygame.draw.rect(surf, (fr, fg, fb), (0, fy0, RW, max(1, fy1 - fy0)))
+        # Subtle moss in mortar bands
+        if is_mortar and shade_f > 0.12:
+            mr = int(16 * shade_f)
+            mg = int(34 * shade_f)
+            mb = int(14 * shade_f)
+            pygame.draw.line(surf, (mr, mg, mb), (0, fy0), (RW, fy0), 1)
 
     # Torch flicker
     flicker = 1.0 + math.sin(t * 9.1) * 0.08 + math.sin(t * 17.3) * 0.05
 
-    # Torch glow — player-position-based, warm amber with stronger reach
+    # Torch glow — player-position-based, warm amber
     raw_glow = 0.0
     for (tc, tr) in TORCHES:
         td = math.hypot(player.x - tc, player.y - tr)
         raw_glow += max(0.0, (1.0 - td / 4.2) * flicker) * 0.5
-    raw_glow = min(raw_glow, 0.6)
+    raw_glow = min(raw_glow, 0.55)
+    glow_idx = max(0, min(SHADE_STEPS, round(raw_glow * SHADE_STEPS)))
 
-    # ── Brick constants ──
-    BRICK_H  = 0.28   # brick height (slightly shorter, more rows)
-    BRICK_W  = 0.45   # brick width
-    MORT_AMT = 28     # mortar darkening amount
-    MOSS_CHN = 0.35   # chance of moss in mortar
-
-    # ── Raycasting ──
+    # ── Raycasting — texture-mapped walls ──
     for col_i in range(NUM_RAYS):
         ray_angle = player.angle - HALF_FOV + (col_i / NUM_RAYS) * FOV
         dist, side, hit_frac = cast_ray(player.x, player.y, ray_angle)
@@ -338,83 +481,43 @@ def draw_view(surf, player, enemies, zbuf, t):
         zbuf[col_i] = corr
 
         wall_h = min(int(RH / (corr + 0.0001) * 0.8), RH)
-        top    = HALF_H - wall_h // 2
+        if wall_h < 1:
+            continue
+        top = HALF_H - wall_h // 2
 
-        # Side-based colour
+        # Select wall texture by direction
         if side == 0:
-            base = WALL_E if math.cos(ray_angle) > 0 else WALL_W
+            direction = 'E' if math.cos(ray_angle) > 0 else 'W'
         else:
-            base = WALL_S if math.sin(ray_angle) > 0 else WALL_N
+            direction = 'S' if math.sin(ray_angle) > 0 else 'N'
 
-        # Distance shading
-        shade   = max(0.04, 1.0 - corr / MAX_D)
-        shade_q = round(shade * SHADE_STEPS) / SHADE_STEPS
+        # Distance shading (quantized for pixel art look)
+        shade = max(0.05, 1.0 - corr / MAX_D)
+        shade_si = max(0, min(SHADE_STEPS, round(shade * SHADE_STEPS)))
 
-        # Torch amber tint — stronger warm glow
-        glow_q = round(raw_glow * SHADE_STEPS) / SHADE_STEPS
-        r = min(int(base[0] * shade_q + TORCH_C[0] * glow_q * 0.20), 255)
-        g = min(int(base[1] * shade_q + TORCH_C[1] * glow_q * 0.08), 255)
-        b = min(int(base[2] * shade_q * 1.05), 255)  # slight purple boost
+        # Sample texture column
+        tex = WALL_SHADED[direction][shade_si]
+        tex_x = int(hit_frac * TEX_SIZE) % TEX_SIZE
+        col_surf = tex.subsurface((tex_x, 0, 1, TEX_SIZE))
+        scaled = pygame.transform.scale(col_surf, (1, wall_h))
+        surf.blit(scaled, (col_i, top))
 
-        # Vertical mortar seam from hit_frac — with moss
-        seam = hit_frac % BRICK_W
-        is_v_seam = seam < 0.035 or seam > (BRICK_W - 0.035)
-        if is_v_seam:
-            # Determine if this seam has moss based on position
-            seam_seed = int(hit_frac * 100 + col_i * 7) % 100
-            if seam_seed < MOSS_CHN * 100:
-                moss_sh = max(0.15, shade_q * 0.7)
-                r = int(MOSS_C[0] * moss_sh)
-                g = int(MOSS_C[1] * moss_sh)
-                b = int(MOSS_C[2] * moss_sh)
-            else:
-                r = max(r - MORT_AMT, 0)
-                g = max(g - MORT_AMT, 0)
-                b = max(b - MORT_AMT, 0)
+        # Torch glow — additive warm tint
+        if glow_idx > 0:
+            ar = min(int(TORCH_C[0] * raw_glow * 0.16), 45)
+            ag = min(int(TORCH_C[1] * raw_glow * 0.07), 18)
+            if ar > 0 or ag > 0:
+                _glow_col_surf.fill((ar, ag, 0))
+                surf.blit(_glow_col_surf.subsurface((0, 0, 1, wall_h)),
+                          (col_i, top), special_flags=pygame.BLEND_RGB_ADD)
 
-        wall_col = (r, g, b)
-        mort_col = (max(r - MORT_AMT, 0), max(g - MORT_AMT, 0), max(b - MORT_AMT, 0))
-        moss_col = (int(MOSS_C[0] * shade_q * 0.6),
-                    int(MOSS_C[1] * shade_q * 0.6),
-                    int(MOSS_C[2] * shade_q * 0.6))
-
-        # Solid wall strip
-        pygame.draw.rect(surf, wall_col, (col_i, top, 1, wall_h))
-
-        # Horizontal mortar lines with moss growth
-        if wall_h > 5:
-            brick_h_px = max(3, int(wall_h * BRICK_H))
-            offset = int(hit_frac * brick_h_px * 1.7) % brick_h_px
-            by_m = top + (brick_h_px - offset) % brick_h_px
-            row_idx = 0
-            while by_m < top + wall_h:
-                if 0 <= by_m < RH:
-                    # Moss in some horizontal mortar lines
-                    m_seed = (int(hit_frac * 50) + row_idx * 13) % 100
-                    if m_seed < MOSS_CHN * 100:
-                        surf.set_at((col_i, by_m), moss_col)
-                        # Moss drip below mortar line
-                        if by_m + 1 < min(RH, top + wall_h) and m_seed < 15:
-                            surf.set_at((col_i, by_m + 1), moss_col)
-                    else:
-                        surf.set_at((col_i, by_m), mort_col)
-                by_m += brick_h_px
-                row_idx += 1
-
-        # Ambient occlusion at wall top/bottom edges — deeper shadows
-        if wall_h > 10:
-            ao_h = max(1, wall_h // 8)
-            ao_c = (max(r-62, 0), max(g-56, 0), max(b-48, 0))
-            pygame.draw.rect(surf, ao_c, (col_i, top, 1, ao_h))
-            pygame.draw.rect(surf, ao_c, (col_i, top + wall_h - ao_h, 1, ao_h))
-            # Vine creep at wall top (some columns)
-            vine_seed = (col_i * 31 + int(hit_frac * 200)) % 100
-            if vine_seed < 12 and wall_h > 20:
-                vine_len = max(1, wall_h // 6)
-                vine_c = (int(VINE_C[0] * shade_q),
-                          int(VINE_C[1] * shade_q),
-                          int(VINE_C[2] * shade_q))
-                pygame.draw.rect(surf, vine_c, (col_i, top, 1, vine_len))
+        # Edge shadow — dark pixel at wall-ceiling and wall-floor seam
+        if wall_h > 6:
+            if 0 <= top < RH:
+                surf.set_at((col_i, top), (4, 3, 2))
+            bot = top + wall_h - 1
+            if 0 <= bot < RH:
+                surf.set_at((col_i, bot), (4, 3, 2))
 
     # ── Enemy sprites ──
     living = [(e, math.hypot(e.x-player.x, e.y-player.y)) for e in enemies if e.alive]
