@@ -1,6 +1,6 @@
 """
-DUNGEON OF SHADOWS  —  First-Person Raycaster
-32-bit Pixel Art Edition
+DUNGEON RUN  —  Endless First-Person Runner
+Procedural Pixel Art Dungeon · Temple Run Style
 pip install pygame
 """
 
@@ -9,7 +9,7 @@ pygame.init()
 
 screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 SW, SH = screen.get_size()
-pygame.display.set_caption("Dungeon FPS — 32-bit Pixel Art")
+pygame.display.set_caption("Dungeon Run — Endless Runner")
 clock = pygame.time.Clock()
 
 # Quarter-resolution render — each rendered pixel = 4×4 block on screen
@@ -177,40 +177,97 @@ WALL_SHADED = {
 # Pre-compute glow overlay column (reused per frame)
 _glow_col_surf = pygame.Surface((1, RH))
 
-# ── Map ───────────────────────────────────────────────────────────────────────
-MAP = [
-    "################",
-    "#..............#",
-    "#.T##..T..##.T.#",
-    "#..#........#..#",
-    "#..#.######.#..#",
-    "#....#....#....#",
-    "#.T..#....#..T.#",
-    "#....#....#....#",
-    "#..#.######.#..#",
-    "#..#........#..#",
-    "#.T##..T..##.T.#",
-    "#..............#",
-    "################",
-    "################",
-]
-MAP_W = len(MAP[0])
-MAP_H = len(MAP)
+# ── Procedural Dungeon Corridor ───────────────────────────────────────────────
 
-TORCHES = [(ci, ri) for ri, row in enumerate(MAP)
-           for ci, ch in enumerate(row) if ch == 'T']
+class Dungeon:
+    """Infinite procedural corridor with T-junctions for Temple Run gameplay"""
+    DX = [1, 0, -1, 0]   # East, South, West, North
+    DY = [0, 1, 0, -1]
+    ANGLES = [0.0, math.pi / 2, math.pi, math.pi * 3 / 2]
 
-def cell(x, y):
-    mx, my = int(x), int(y)
-    if 0 <= my < MAP_H and 0 <= mx < MAP_W:
-        return MAP[my][mx]
-    return '#'
+    def __init__(self):
+        self.open = set()
+        self.torches = []
+        self.obstacles = []
+        self.head_x = 5
+        self.head_y = 50
+        self.head_dir = 0   # East
+        self.junctions = []
+        self._seg_id = 0
+        self._generate_segments(10)
 
-def is_wall(x, y):
-    return cell(x, y) == '#'
+    def _carve_straight(self, length):
+        dx, dy = self.DX[self.head_dir], self.DY[self.head_dir]
+        px, py = -dy, dx
+        for i in range(length):
+            for w in range(-1, 2):
+                self.open.add((self.head_x + dx * i + px * w,
+                               self.head_y + dy * i + py * w))
+        if length > 5:
+            mid = length // 2
+            side = 1 if self._seg_id % 2 == 0 else -1
+            self.torches.append((self.head_x + dx * mid + px * side * 2,
+                                 self.head_y + dy * mid + py * side * 2))
+            if self._seg_id > 2 and random.random() < 0.35:
+                lane = random.choice([-1, 0, 1])
+                ox = self.head_x + dx * (mid + 2) + px * lane
+                oy = self.head_y + dy * (mid + 2) + py * lane
+                self.obstacles.append(Obstacle(ox + 0.5, oy + 0.5))
+        self.head_x += dx * length
+        self.head_y += dy * length
+        self._seg_id += 1
 
-# ── DDA Raycaster — returns (dist, side, hit_frac) ───────────────────────────
-def cast_ray(ox, oy, angle):
+    def _carve_junction(self):
+        for ox in range(-2, 3):
+            for oy in range(-2, 3):
+                self.open.add((self.head_x + ox, self.head_y + oy))
+        left_dir = (self.head_dir - 1) % 4
+        right_dir = (self.head_dir + 1) % 4
+        for tdir in [left_dir, right_dir]:
+            tdx, tdy = self.DX[tdir], self.DY[tdir]
+            tpx, tpy = -tdy, tdx
+            for i in range(10):
+                for w in range(-1, 2):
+                    self.open.add((self.head_x + tdx * i + tpx * w,
+                                  self.head_y + tdy * i + tpy * w))
+        self.torches.append((self.head_x, self.head_y))
+        self.junctions.append({
+            'x': self.head_x, 'y': self.head_y,
+            'from_dir': self.head_dir,
+            'left_dir': left_dir,
+            'right_dir': right_dir,
+            'resolved': False,
+        })
+
+    def _generate_segments(self, count):
+        for _ in range(count):
+            self._carve_straight(random.randint(8, 18))
+            self._carve_junction()
+
+    def resolve_junction(self, junc, chosen_dir):
+        junc['resolved'] = True
+        self.head_dir = chosen_dir
+        dx, dy = self.DX[chosen_dir], self.DY[chosen_dir]
+        self.head_x = junc['x'] + dx * 10
+        self.head_y = junc['y'] + dy * 10
+        self._generate_segments(5)
+
+    def get_nearest_junction(self, px, py):
+        best, best_d = None, float('inf')
+        for j in self.junctions:
+            if j['resolved']:
+                continue
+            d = math.hypot(px - j['x'], py - j['y'])
+            if d < best_d:
+                best_d = d
+                best = j
+        return best, best_d
+
+    def is_wall(self, x, y):
+        return (int(x), int(y)) not in self.open
+
+# ── DDA Raycaster ─────────────────────────────────────────────────────────────
+def cast_ray(dungeon, ox, oy, angle):
     sin_a = math.sin(angle)
     cos_a = math.cos(angle)
     map_x, map_y = int(ox), int(oy)
@@ -232,7 +289,7 @@ def cast_ray(ox, oy, angle):
             side_y += delta_y
             map_y  += step_y
             side = 1
-        if 0 <= map_y < MAP_H and 0 <= map_x < MAP_W and MAP[map_y][map_x] == '#':
+        if dungeon.is_wall(map_x, map_y):
             if side == 0:
                 dist = (map_x - ox + (0 if step_x > 0 else 1)) / cos_a
                 hit_frac = (oy + dist * sin_a) % 1.0
@@ -242,128 +299,103 @@ def cast_ray(ox, oy, angle):
             return max(0.01, dist), side, hit_frac
     return MAX_D, 0, 0.0
 
-# ── Player ────────────────────────────────────────────────────────────────────
+# ── Player (Auto-Runner) ─────────────────────────────────────────────────────
 class Player:
     MAXHP = 100
-    SPD   = 0.04
-    ROT   = 0.04
-    ATK   = 35
-    ATKR  = 2.2
+    ATK   = 40
+    ATKR  = 2.0
 
-    def __init__(self):
-        self.x     = 1.5
-        self.y     = 1.5
-        self.angle = 0.0
-        self.hp    = self.MAXHP
-        self.alive = True
-        self.flash = 0
-        self.acd   = 0
-        self.score = 0
-        self.bob   = 0.0
-        self.move_fwd = False
-        self.move_bk  = False
-        self.turn_l   = False
-        self.turn_r   = False
+    def __init__(self, sx=5.5, sy=50.5):
+        self.x = sx;  self.y = sy
+        self.dir = 0
+        self.angle = 0.0;  self.target_angle = 0.0
+        self.speed = 0.04
+        self.hp = self.MAXHP;  self.alive = True
+        self.score = 0;  self.distance = 0.0
+        self.flash = 0;  self.bob = 0.0
+        self.turn_request = 0;  self.acd = 0
 
-    def update(self, enemies):
+    def update(self, dungeon):
         if not self.alive: return
-        moved = False
-        if self.turn_l: self.angle -= self.ROT
-        if self.turn_r: self.angle += self.ROT
-        dx = math.cos(self.angle) * self.SPD
-        dy = math.sin(self.angle) * self.SPD
-        if self.move_fwd:
-            nx, ny = self.x + dx, self.y + dy
-            if not is_wall(nx, self.y): self.x = nx
-            if not is_wall(self.x, ny): self.y = ny
-            moved = True
-        if self.move_bk:
-            nx, ny = self.x - dx, self.y - dy
-            if not is_wall(nx, self.y): self.x = nx
-            if not is_wall(self.x, ny): self.y = ny
-            moved = True
-        if moved: self.bob += 0.25
+        # Smooth turn
+        diff = self.target_angle - self.angle
+        while diff >  math.pi: diff -= 2 * math.pi
+        while diff < -math.pi: diff += 2 * math.pi
+        if abs(diff) > 0.015:
+            self.angle += diff * 0.2
+        else:
+            self.angle = self.target_angle
+        # Auto-run forward
+        dx = math.cos(self.angle) * self.speed
+        dy = math.sin(self.angle) * self.speed
+        nx, ny = self.x + dx, self.y + dy
+        m = 0.22
+        cx = 1 if dx > 0 else (-1 if dx < 0 else 0)
+        cy = 1 if dy > 0 else (-1 if dy < 0 else 0)
+        if (dungeon.is_wall(nx + m * cx, self.y) or
+            dungeon.is_wall(self.x, ny + m * cy) or
+            dungeon.is_wall(nx + m * cx, ny + m * cy)):
+            self.alive = False
+            self.flash = 30
+            return
+        self.x, self.y = nx, ny
+        self.distance += self.speed
+        self.score = int(self.distance * 10)
+        self.bob += 0.28
+        self.speed = min(0.09, 0.04 + self.distance * 0.00008)
         if self.flash > 0: self.flash -= 1
         if self.acd   > 0: self.acd   -= 1
+        # Junction detection
+        junc, jd = dungeon.get_nearest_junction(self.x, self.y)
+        if junc and jd < 2.0 and self.turn_request != 0:
+            chosen = junc['left_dir'] if self.turn_request == -1 else junc['right_dir']
+            self.dir = chosen
+            self.target_angle = Dungeon.ANGLES[chosen]
+            dungeon.resolve_junction(junc, chosen)
+            self.turn_request = 0
 
-    def attack(self, enemies):
+    def attack(self, obstacles):
         if self.acd > 0 or not self.alive: return False
-        self.acd = 25
+        self.acd = 20
         hit = False
-        for e in enemies:
-            if not e.alive: continue
-            d = math.hypot(e.x - self.x, e.y - self.y)
+        for o in obstacles:
+            if not o.alive: continue
+            d = math.hypot(o.x - self.x, o.y - self.y)
             if d < self.ATKR:
-                dx, dy = e.x - self.x, e.y - self.y
-                ea = math.atan2(dy, dx)
-                da = ea - self.angle
-                while da >  math.pi: da -= 2*math.pi
-                while da < -math.pi: da += 2*math.pi
+                da = math.atan2(o.y - self.y, o.x - self.x) - self.angle
+                while da >  math.pi: da -= 2 * math.pi
+                while da < -math.pi: da += 2 * math.pi
                 if abs(da) < HALF_FOV * 0.9:
-                    e.do_hit(self.ATK)
+                    o.do_hit(self.ATK)
                     hit = True
-                    if not e.alive: self.score += 10
+                    if not o.alive: self.score += 25
         return hit
 
     def damage(self, dmg):
         self.hp -= dmg
-        self.flash = 15
+        self.flash = 12
         if self.hp <= 0:
             self.hp = 0
             self.alive = False
 
-# ── Enemy ─────────────────────────────────────────────────────────────────────
-class Enemy:
-    MAXHP = 50
-    SPD   = 0.012
-    ATKR  = 0.7
-    ATKD  = 6
-    ATKCD = 80
-    DETR  = 7.0
-
+# ── Obstacle (goblin standing in corridor) ────────────────────────────────────
+class Obstacle:
+    MAXHP = 30
     def __init__(self, x, y):
-        self.x     = x
-        self.y     = y
-        self.hp    = self.MAXHP
-        self.alive = True
-        self.acd   = random.randint(0, self.ATKCD)
-        self.wt    = 0
-        self.wdx   = 0.0
-        self.wdy   = 0.0
+        self.x = x; self.y = y
+        self.hp = self.MAXHP; self.alive = True
         self.flash = 0
-
     def update(self, player):
         if not self.alive: return
         if self.flash > 0: self.flash -= 1
-        if self.acd   > 0: self.acd   -= 1
         d = math.hypot(player.x - self.x, player.y - self.y)
-        if d < self.ATKR and self.acd == 0 and player.alive:
-            player.damage(self.ATKD)
-            self.acd = self.ATKCD
-            return
-        if d < self.DETR and player.alive and d > 0.01:
-            ax, ay = (player.x - self.x) / d, (player.y - self.y) / d
-        else:
-            self.wt -= 1
-            if self.wt <= 0:
-                ang = random.uniform(0, math.pi * 2)
-                self.wdx, self.wdy = math.cos(ang), math.sin(ang)
-                self.wt = random.randint(60, 180)
-            ax, ay = self.wdx, self.wdy
-        nx = self.x + ax * self.SPD
-        ny = self.y + ay * self.SPD
-        if not is_wall(nx, self.y): self.x = nx
-        if not is_wall(self.x, ny): self.y = ny
-
-    def do_hit(self, dmg):
-        self.hp -= dmg
-        self.flash = 10
-        if self.hp <= 0:
-            self.hp = 0
+        if d < 0.5 and player.alive:
+            player.damage(20)
             self.alive = False
-
-ENEMY_STARTS = [(3.5,3.5),(12.5,3.5),(3.5,10.5),(12.5,10.5),
-                (8.5,6.5),(6.5,7.5),(10.5,7.5)]
+    def do_hit(self, dmg):
+        self.hp -= dmg; self.flash = 8
+        if self.hp <= 0:
+            self.hp = 0; self.alive = False
 
 # ── Touch Buttons ─────────────────────────────────────────────────────────────
 class Button:
@@ -398,20 +430,18 @@ class Button:
 def make_buttons():
     r   = int(SH * 0.07)
     by  = SH - HUD_H // 2
-    gap = int(SW * 0.14)
-    lx  = int(SW * 0.18)
+    gap = int(SW * 0.18)
+    lx  = int(SW * 0.22)
     rx  = int(SW * 0.82)
     return {
-        'fwd' : Button("^",   lx,       by - r, r),
-        'bk'  : Button("v",   lx,       by + r, r),
-        'left': Button("<",   lx - gap, by,     r),
-        'right':Button(">",   lx + gap, by,     r),
-        'atk' : Button("ATK", rx,       by,     int(r*1.3)),
+        'left' : Button("<",  lx - gap // 2, by, r),
+        'right': Button(">",  lx + gap // 2, by, r),
+        'atk'  : Button("ATK", rx,           by, int(r * 1.3)),
     }
 
 
 # ── draw_view ─────────────────────────────────────────────────────────────────
-def draw_view(surf, player, enemies, zbuf, t):
+def draw_view(surf, player, dungeon, zbuf, t):
 
     # ── Ceiling — dark stone with perspective gradient ──
     ceil_bands = 16
@@ -467,16 +497,17 @@ def draw_view(surf, player, enemies, zbuf, t):
 
     # Torch glow — player-position-based, warm amber
     raw_glow = 0.0
-    for (tc, tr) in TORCHES:
+    for (tc, tr) in dungeon.torches:
         td = math.hypot(player.x - tc, player.y - tr)
-        raw_glow += max(0.0, (1.0 - td / 4.2) * flicker) * 0.5
+        if td < 5.0:
+            raw_glow += max(0.0, (1.0 - td / 4.2) * flicker) * 0.5
     raw_glow = min(raw_glow, 0.55)
     glow_idx = max(0, min(SHADE_STEPS, round(raw_glow * SHADE_STEPS)))
 
     # ── Raycasting — texture-mapped walls ──
     for col_i in range(NUM_RAYS):
         ray_angle = player.angle - HALF_FOV + (col_i / NUM_RAYS) * FOV
-        dist, side, hit_frac = cast_ray(player.x, player.y, ray_angle)
+        dist, side, hit_frac = cast_ray(dungeon, player.x, player.y, ray_angle)
         corr = dist * math.cos(ray_angle - player.angle)
         zbuf[col_i] = corr
 
@@ -519,8 +550,8 @@ def draw_view(surf, player, enemies, zbuf, t):
             if 0 <= bot < RH:
                 surf.set_at((col_i, bot), (4, 3, 2))
 
-    # ── Enemy sprites ──
-    living = [(e, math.hypot(e.x-player.x, e.y-player.y)) for e in enemies if e.alive]
+    # ── Obstacle sprites ──
+    living = [(e, math.hypot(e.x-player.x, e.y-player.y)) for e in dungeon.obstacles if e.alive]
     living.sort(key=lambda x: -x[1])
 
     for e, dist_e in living:
@@ -603,7 +634,7 @@ def draw_view(surf, player, enemies, zbuf, t):
                     pygame.draw.rect(surf, sc_, (sxs, bby, max(1, segw-1), bh_h))
 
     # ── Torch sprites ──
-    for tc, tr in TORCHES:
+    for tc, tr in dungeon.torches:
         dx_t   = (tc + 0.5) - player.x
         dy_t   = (tr + 0.5) - player.y
         dist_t = math.hypot(dx_t, dy_t)
@@ -692,6 +723,16 @@ def draw_view(surf, player, enemies, zbuf, t):
     pom_h = max(3, grip_h // 3)
     pygame.draw.rect(surf, (82, 74, 68), (grip_x - 2, grip_y + grip_h, pom_w, pom_h))
 
+    # ── Junction warning ──
+    junc, jd = dungeon.get_nearest_junction(player.x, player.y)
+    if junc and jd < 6.0 and not junc['resolved'] and player.alive:
+        urgency = max(0, 1.0 - jd / 6.0)
+        if int(t * 6) % 2 == 0 or urgency > 0.6:
+            alpha = int(urgency * 180)
+            warn_s = pygame.Surface((RW, 14), pygame.SRCALPHA)
+            warn_s.fill((200, 160, 20, alpha))
+            surf.blit(warn_s, (0, 2))
+
     # ── Damage flash vignette ──
     if player.flash > 0:
         alpha = int(player.flash / 15 * 120)
@@ -701,58 +742,75 @@ def draw_view(surf, player, enemies, zbuf, t):
 
 
 # ── draw_hud_panel ────────────────────────────────────────────────────────────
-def draw_hud_panel(surf, player, buttons, font, sfont):
+def draw_hud_panel(surf, player, dungeon, buttons, font, sfont):
     pygame.draw.rect(surf, (10, 8, 16), (0, VIEW_H, SW, HUD_H))
     pygame.draw.line(surf, BTN_BD, (0, VIEW_H),   (SW, VIEW_H),   3)
     pygame.draw.line(surf, BTN_HL, (0, VIEW_H+3), (SW, VIEW_H+3), 1)
     for cx_, cy_ in [(0, VIEW_H), (SW-8, VIEW_H)]:
         pygame.draw.rect(surf, GOLD, (cx_, cy_, 8, 8))
 
-    bw = int(SW * 0.25)
-    draw_bar(surf, 10, VIEW_H + 10, player.hp, player.MAXHP, bw, 18)
-    surf.blit(sfont.render("HP", True, GREY), (bw + 18, VIEW_H + 12))
+    # HP bar
+    bw = int(SW * 0.18)
+    draw_bar(surf, 10, VIEW_H + 10, player.hp, player.MAXHP, bw, 16)
+    surf.blit(sfont.render("HP", True, GREY), (bw + 16, VIEW_H + 11))
 
-    sc_text = "SCORE {:05d}".format(player.score)
+    # Distance / score
+    sc_text = "DIST {:06d}m".format(player.score)
     sc      = font.render(sc_text, True, GOLD)
-    sc_x    = SW//2 - sc.get_width()//2
-    sc_y    = VIEW_H + 8
+    sc_x    = SW // 2 - sc.get_width() // 2
+    sc_y    = VIEW_H + 6
     pygame.draw.rect(surf, (6, 4, 10),
         (sc_x - 8, sc_y - 3, sc.get_width() + 16, sc.get_height() + 6))
     pygame.draw.rect(surf, BTN_BD,
         (sc_x - 8, sc_y - 3, sc.get_width() + 16, sc.get_height() + 6), 2)
     surf.blit(sc, (sc_x, sc_y))
 
+    # Speed indicator
+    spd_ratio = min(1.0, (player.speed - 0.04) / 0.05)
+    spd_w = int(SW * 0.12)
+    spd_x = sc_x - 8
+    spd_y = sc_y + sc.get_height() + 8
+    pygame.draw.rect(surf, (30, 12, 10), (spd_x, spd_y, spd_w, 8))
+    pygame.draw.rect(surf, (200, 80 + int(120 * (1 - spd_ratio)), 30),
+                     (spd_x, spd_y, int(spd_w * spd_ratio), 8))
+    surf.blit(sfont.render("SPD", True, GREY), (spd_x + spd_w + 6, spd_y - 1))
+
+    # Buttons
     for btn in buttons.values():
         btn.draw(surf, font)
 
-    mm_x  = int(SW * 0.62)
-    mm_y  = VIEW_H + 4
-    mm_s  = max(2, int(HUD_H * 0.82) // MAP_H)
-    mm_w  = mm_s * MAP_W
-    mm_h  = mm_s * MAP_H
+    # Minimap — scrolling view around player
+    mm_range = 8
+    mm_size  = mm_range * 2 + 1
+    mm_s     = max(2, int(HUD_H * 0.72) // mm_size)
+    mm_w     = mm_s * mm_size
+    mm_h     = mm_s * mm_size
+    mm_x     = int(SW * 0.64)
+    mm_y     = VIEW_H + (HUD_H - mm_h) // 2
 
+    pcx, pcy = int(player.x), int(player.y)
     pygame.draw.rect(surf, (6, 4, 10), (mm_x - 3, mm_y - 3, mm_w + 6, mm_h + 6))
-    for ry in range(MAP_H):
-        for rx in range(MAP_W):
-            col = (52, 48, 64) if MAP[ry][rx] == '#' else (14, 12, 20)
-            pygame.draw.rect(surf, col, (mm_x + rx*mm_s, mm_y + ry*mm_s, mm_s, mm_s))
+    for dy in range(-mm_range, mm_range + 1):
+        for dx in range(-mm_range, mm_range + 1):
+            if dungeon.is_wall(pcx + dx, pcy + dy):
+                col = (42, 38, 48)
+            else:
+                col = (24, 22, 18)
+            sx = mm_x + (dx + mm_range) * mm_s
+            sy = mm_y + (dy + mm_range) * mm_s
+            pygame.draw.rect(surf, col, (sx, sy, mm_s, mm_s))
 
-    for tc_, tr_ in TORCHES:
-        pygame.draw.rect(surf, (200, 100, 10),
-            (mm_x + tc_*mm_s + mm_s//3, mm_y + tr_*mm_s + mm_s//3,
-             max(1, mm_s//2), max(1, mm_s//2)))
-
-    pdx = int(player.x * mm_s)
-    pdy = int(player.y * mm_s)
+    # Player dot
+    px_mm = mm_x + mm_range * mm_s + mm_s // 2
+    py_mm = mm_y + mm_range * mm_s + mm_s // 2
     pygame.draw.rect(surf, (90, 180, 240),
-        (mm_x + pdx - mm_s//2, mm_y + pdy - mm_s//2, mm_s, mm_s))
-    pygame.draw.line(surf, WHITE,
-        (mm_x+pdx, mm_y+pdy),
-        (mm_x+pdx + int(math.cos(player.angle)*mm_s*2),
-         mm_y+pdy + int(math.sin(player.angle)*mm_s*2)), 1)
+        (px_mm - mm_s // 2, py_mm - mm_s // 2, mm_s, mm_s))
+    ll = mm_s * 2
+    pygame.draw.line(surf, WHITE, (px_mm, py_mm),
+        (px_mm + int(math.cos(player.angle) * ll),
+         py_mm + int(math.sin(player.angle) * ll)), 1)
 
-    pygame.draw.rect(surf, BTN_BD, (mm_x-3, mm_y-3, mm_w+6, mm_h+6), 2)
-    pygame.draw.rect(surf, BTN_HL, (mm_x-5, mm_y-5, mm_w+10, mm_h+10), 1)
+    pygame.draw.rect(surf, BTN_BD, (mm_x - 3, mm_y - 3, mm_w + 6, mm_h + 6), 2)
 
 
 # ── draw_bar ──────────────────────────────────────────────────────────────────
@@ -779,8 +837,8 @@ def game_over_screen(surf, font, bfont, score):
     ov.fill((0, 0, 0, 195))
     surf.blit(ov, (0, 0))
 
-    t1 = bfont.render("YOU DIED", True, RED_LT)
-    t2 = font.render("Score: {}".format(score), True, GOLD)
+    t1 = bfont.render("CRASHED!", True, RED_LT)
+    t2 = font.render("Distance: {}m".format(score), True, GOLD)
     t3 = font.render("Tap ATK to restart", True, WHITE)
 
     box_x = SW//2 - t1.get_width()//2 - 20
@@ -805,35 +863,31 @@ def main():
     except Exception:
         font = bfont = sfont = pygame.font.Font(None, 28)
 
-    state = {
-        'player'    : Player(),
-        'enemies'   : [Enemy(x, y) for x, y in ENEMY_STARTS],
-        'atk_flash' : 0,
-    }
-    buttons = make_buttons()
-    zbuf    = [MAX_D] * RW
-    t       = 0.0
-
-    def do_attack():
-        if state['player'].attack(state['enemies']):
-            state['atk_flash'] = 8
+    dungeon  = Dungeon()
+    player   = Player()
+    buttons  = make_buttons()
+    zbuf     = [MAX_D] * RW
+    t        = 0.0
+    atk_flash = 0
 
     def handle_press(x, y, down):
-        p = state['player']
+        nonlocal dungeon, atk_flash
         for name, btn in buttons.items():
             if btn.hit(x, y):
                 btn.pressed = down
                 if down:
-                    if name == 'atk':
-                        if not p.alive:
-                            state['player']  = Player()
-                            state['enemies'] = [Enemy(ex, ey) for ex, ey in ENEMY_STARTS]
+                    if name == 'left':
+                        player.turn_request = -1
+                    elif name == 'right':
+                        player.turn_request = 1
+                    elif name == 'atk':
+                        if not player.alive:
+                            dungeon  = Dungeon()
+                            player.__init__()
+                            atk_flash = 0
                         else:
-                            do_attack()
-                p.move_fwd = buttons['fwd'].pressed
-                p.move_bk  = buttons['bk'].pressed
-                p.turn_l   = buttons['left'].pressed
-                p.turn_r   = buttons['right'].pressed
+                            if player.attack(dungeon.obstacles):
+                                atk_flash = 8
 
     fingers = {}
 
@@ -844,8 +898,20 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit(); sys.exit()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    pygame.quit(); sys.exit()
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    player.turn_request = -1
+                if event.key in (pygame.K_RIGHT, pygame.K_d):
+                    player.turn_request = 1
+                if event.key == pygame.K_SPACE:
+                    if not player.alive:
+                        dungeon = Dungeon()
+                        player.__init__()
+                        atk_flash = 0
+                    elif player.attack(dungeon.obstacles):
+                        atk_flash = 8
 
             if event.type == pygame.FINGERDOWN:
                 fx = int(event.x * SW)
@@ -872,28 +938,26 @@ def main():
             if event.type == pygame.MOUSEBUTTONUP:
                 handle_press(*event.pos, False)
 
-        player  = state['player']
-        enemies = state['enemies']
+        # Update
+        player.update(dungeon)
+        for o in dungeon.obstacles:
+            o.update(player)
+        # Clean up far-away dead obstacles
+        dungeon.obstacles = [o for o in dungeon.obstacles
+                             if o.alive or math.hypot(o.x - player.x, o.y - player.y) < 20]
 
-        player.update(enemies)
-        for e in enemies:
-            e.update(player)
+        if atk_flash > 0:
+            atk_flash -= 1
 
-        if player.alive and all(not e.alive for e in enemies):
-            state['enemies'] = [Enemy(x, y) for x, y in ENEMY_STARTS]
-            player.score += 50
-
-        if state['atk_flash'] > 0:
-            state['atk_flash'] -= 1
-
-        draw_view(render_surf, player, enemies, zbuf, t)
+        # Render
+        draw_view(render_surf, player, dungeon, zbuf, t)
 
         pygame.transform.scale(render_surf, (SW, VIEW_H),
                                screen.subsurface((0, 0, SW, VIEW_H)))
 
-        draw_hud_panel(screen, player, buttons, font, sfont)
+        draw_hud_panel(screen, player, dungeon, buttons, font, sfont)
 
-        if state['atk_flash'] > 0:
+        if atk_flash > 0:
             hbtn = buttons['atk']
             rf   = hbtn.r + 7
             pygame.draw.rect(screen, GOLD,
