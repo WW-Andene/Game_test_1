@@ -28,24 +28,26 @@ HALF_VH  = VIEW_H // 2
 
 SHADE_STEPS = 6
 
-# ── Palette — Dark Stone Dungeon ──────────────────────────────────────────────
-SKY     = (10,  12,  14)   # near-black cool stone ceiling
-GROUND  = (14,  15,  16)   # near-black cool stone floor
-WALL_N  = (52,  56,  60)   # north: cool mid gray stone
-WALL_S  = (30,  33,  36)   # south: dark shadowed stone
-WALL_E  = (72,  78,  84)   # east:  lighter stone (lit face)
-WALL_W  = (44,  48,  52)   # west:  medium stone
-MORTAR  = ( 8,   8,   9)   # near-black stone mortar
-TORCH_C = (255, 130,  18)  # amber torch flame
+# ── Palette — Gothic Dungeon ──────────────────────────────────────────────────
+SKY     = (16,  12,  26)   # deep indigo ceiling
+GROUND  = (18,  16,  22)   # dark purple-gray stone floor
+WALL_N  = (62,  58,  74)   # north: cool purple-gray stone
+WALL_S  = (36,  32,  46)   # south: dark shadowed stone
+WALL_E  = (82,  76,  94)   # east:  lighter stone (lit face)
+WALL_W  = (48,  44,  58)   # west:  medium stone
+MORTAR  = (10,   8,  14)   # dark mortar with purple tint
+MOSS_C  = (28,  56,  34)   # dark green moss in crevices
+VINE_C  = (22,  48,  28)   # vine green
+TORCH_C = (255, 140,  24)  # warm amber torch flame
 GOLD    = (220, 180,  40)  # pixel gold
-RED_LT  = (220,  40,  40)  # vivid red
+RED_LT  = (200,  36,  36)  # deep red
 GREEN   = ( 28, 200,  52)  # vivid green
-GREY    = (110, 118, 128)  # cool gray text
-WHITE   = (220, 225, 230)  # cool near-white
+GREY    = (100, 102, 116)  # cool gray-purple text
+WHITE   = (215, 218, 228)  # cool near-white
 BLACK   = (  0,   0,   0)
-BTN_BG  = ( 12,  13,  15)  # button background
-BTN_BD  = ( 65,  68,  72)  # button border — stone gray
-BTN_HL  = ( 90,  95, 100)  # button highlight
+BTN_BG  = ( 14,  12,  20)  # button background — purple tint
+BTN_BD  = ( 58,  54,  72)  # button border — stone purple-gray
+BTN_HL  = ( 82,  78,  96)  # button highlight
 
 # ── Map ───────────────────────────────────────────────────────────────────────
 MAP = [
@@ -252,7 +254,7 @@ class Button:
         col = BTN_HL if self.pressed else BTN_BG
         rx_, ry_ = self.cx - r, self.cy - r
         rw_, rh_ = r * 2, r * 2
-        pygame.draw.rect(surf, (4, 4, 5), (rx_ + 4, ry_ + 4, rw_, rh_))
+        pygame.draw.rect(surf, (6, 4, 8), (rx_ + 4, ry_ + 4, rw_, rh_))
         pygame.draw.rect(surf, col, (rx_, ry_, rw_, rh_))
         pygame.draw.rect(surf, BTN_BD, (rx_, ry_, rw_, rh_), bdr)
         hl = tuple(min(c + 40, 255) for c in col)
@@ -283,33 +285,50 @@ def make_buttons():
 # ── draw_view ─────────────────────────────────────────────────────────────────
 def draw_view(surf, player, enemies, zbuf, t):
 
-    # ── Ceiling — near-black stone ──
+    # ── Ceiling — dark indigo stone with beam structure ──
     surf.fill(SKY, (0, 0, RW, HALF_H))
-    # Subtle lighter band near horizon (ambient stone glow)
-    pygame.draw.rect(surf, (16, 18, 20), (0, HALF_H - HALF_H//6, RW, HALF_H//6))
+    # Crossbeam lines on ceiling (perspective-corrected)
+    beam_col = (24, 18, 36)
+    beam_hi  = (30, 24, 44)
+    for bd in [0.7, 1.4, 2.4, 3.8, 6.0, 10.0]:
+        cy = int(HALF_H - (RH - HALF_H) * 0.40 / (bd * 0.5 + 0.001))
+        cy = max(0, min(HALF_H - 1, cy))
+        pygame.draw.line(surf, beam_col, (0, cy), (RW, cy), max(1, 3 - int(bd * 0.3)))
+        if cy + 1 < HALF_H:
+            pygame.draw.line(surf, beam_hi, (0, cy + 1), (RW, cy + 1), 1)
+    # Vertical ceiling beams
+    for vb in range(0, RW, max(4, RW // 8)):
+        pygame.draw.line(surf, beam_col, (vb, 0), (vb, HALF_H // 3), 1)
+    # Subtle purple haze near horizon
+    pygame.draw.rect(surf, (22, 16, 32), (0, HALF_H - HALF_H//5, RW, HALF_H//5))
 
-    # ── Floor — dark stone with perspective tile lines ──
+    # ── Floor — cobblestone with moss growth ──
     surf.fill(GROUND, (0, HALF_H, RW, RH - HALF_H))
-    tile_col = (GROUND[0]+10, GROUND[1]+11, GROUND[2]+12)
-    for row_dist in [0.8, 1.2, 1.8, 2.6, 3.8, 5.5, 8.0, 12.0]:
+    tile_col  = (GROUND[0]+10, GROUND[1]+9, GROUND[2]+12)
+    moss_line = (MOSS_C[0]//2, MOSS_C[1]//2, MOSS_C[2]//2)
+    for row_dist in [0.6, 0.9, 1.3, 1.8, 2.5, 3.4, 4.8, 6.8, 10.0, 15.0]:
         proj_y = int(HALF_H + (RH - HALF_H) * 0.45 / (row_dist * 0.5 + 0.001))
         proj_y = min(RH - 1, max(HALF_H + 1, proj_y))
         pygame.draw.line(surf, tile_col, (0, proj_y), (RW, proj_y), 1)
+        # Moss between floor tiles
+        if proj_y + 1 < RH:
+            pygame.draw.line(surf, moss_line, (0, proj_y + 1), (RW, proj_y + 1), 1)
 
     # Torch flicker
-    flicker = 1.0 + math.sin(t * 9.1) * 0.06 + math.sin(t * 17.3) * 0.04
+    flicker = 1.0 + math.sin(t * 9.1) * 0.08 + math.sin(t * 17.3) * 0.05
 
-    # Torch glow — player-position-based, subtle amber
+    # Torch glow — player-position-based, warm amber with stronger reach
     raw_glow = 0.0
     for (tc, tr) in TORCHES:
         td = math.hypot(player.x - tc, player.y - tr)
-        raw_glow += max(0.0, (1.0 - td / 3.8) * flicker) * 0.4
-    raw_glow = min(raw_glow, 0.5)
+        raw_glow += max(0.0, (1.0 - td / 4.2) * flicker) * 0.5
+    raw_glow = min(raw_glow, 0.6)
 
     # ── Brick constants ──
-    BRICK_H  = 0.33   # brick height (3 rows per world-unit wall)
-    BRICK_W  = 0.50   # brick width (2 per face)
-    MORT_AMT = 32     # mortar darkening amount
+    BRICK_H  = 0.28   # brick height (slightly shorter, more rows)
+    BRICK_W  = 0.45   # brick width
+    MORT_AMT = 28     # mortar darkening amount
+    MOSS_CHN = 0.35   # chance of moss in mortar
 
     # ── Raycasting ──
     for col_i in range(NUM_RAYS):
@@ -328,45 +347,74 @@ def draw_view(surf, player, enemies, zbuf, t):
             base = WALL_S if math.sin(ray_angle) > 0 else WALL_N
 
         # Distance shading
-        shade   = max(0.05, 1.0 - corr / MAX_D)
+        shade   = max(0.04, 1.0 - corr / MAX_D)
         shade_q = round(shade * SHADE_STEPS) / SHADE_STEPS
 
-        # Subtle torch amber tint
+        # Torch amber tint — stronger warm glow
         glow_q = round(raw_glow * SHADE_STEPS) / SHADE_STEPS
-        r = min(int(base[0] * shade_q + TORCH_C[0] * glow_q * 0.15), 255)
-        g = min(int(base[1] * shade_q + TORCH_C[1] * glow_q * 0.06), 255)
-        b = min(int(base[2] * shade_q), 255)
+        r = min(int(base[0] * shade_q + TORCH_C[0] * glow_q * 0.20), 255)
+        g = min(int(base[1] * shade_q + TORCH_C[1] * glow_q * 0.08), 255)
+        b = min(int(base[2] * shade_q * 1.05), 255)  # slight purple boost
 
-        # Vertical mortar seam from hit_frac
+        # Vertical mortar seam from hit_frac — with moss
         seam = hit_frac % BRICK_W
-        is_v_seam = seam < 0.032 or seam > (BRICK_W - 0.032)
+        is_v_seam = seam < 0.035 or seam > (BRICK_W - 0.035)
         if is_v_seam:
-            r = max(r - MORT_AMT, 0)
-            g = max(g - MORT_AMT, 0)
-            b = max(b - MORT_AMT, 0)
+            # Determine if this seam has moss based on position
+            seam_seed = int(hit_frac * 100 + col_i * 7) % 100
+            if seam_seed < MOSS_CHN * 100:
+                moss_sh = max(0.15, shade_q * 0.7)
+                r = int(MOSS_C[0] * moss_sh)
+                g = int(MOSS_C[1] * moss_sh)
+                b = int(MOSS_C[2] * moss_sh)
+            else:
+                r = max(r - MORT_AMT, 0)
+                g = max(g - MORT_AMT, 0)
+                b = max(b - MORT_AMT, 0)
 
         wall_col = (r, g, b)
         mort_col = (max(r - MORT_AMT, 0), max(g - MORT_AMT, 0), max(b - MORT_AMT, 0))
+        moss_col = (int(MOSS_C[0] * shade_q * 0.6),
+                    int(MOSS_C[1] * shade_q * 0.6),
+                    int(MOSS_C[2] * shade_q * 0.6))
 
         # Solid wall strip
         pygame.draw.rect(surf, wall_col, (col_i, top, 1, wall_h))
 
-        # Horizontal mortar lines (brick rows)
+        # Horizontal mortar lines with moss growth
         if wall_h > 5:
             brick_h_px = max(3, int(wall_h * BRICK_H))
             offset = int(hit_frac * brick_h_px * 1.7) % brick_h_px
             by_m = top + (brick_h_px - offset) % brick_h_px
+            row_idx = 0
             while by_m < top + wall_h:
                 if 0 <= by_m < RH:
-                    surf.set_at((col_i, by_m), mort_col)
+                    # Moss in some horizontal mortar lines
+                    m_seed = (int(hit_frac * 50) + row_idx * 13) % 100
+                    if m_seed < MOSS_CHN * 100:
+                        surf.set_at((col_i, by_m), moss_col)
+                        # Moss drip below mortar line
+                        if by_m + 1 < min(RH, top + wall_h) and m_seed < 15:
+                            surf.set_at((col_i, by_m + 1), moss_col)
+                    else:
+                        surf.set_at((col_i, by_m), mort_col)
                 by_m += brick_h_px
+                row_idx += 1
 
-        # Ambient occlusion at wall top/bottom edges
+        # Ambient occlusion at wall top/bottom edges — deeper shadows
         if wall_h > 10:
-            ao_h = max(1, wall_h // 10)
-            ao_c = (max(r-58, 0), max(g-52, 0), max(b-52, 0))
+            ao_h = max(1, wall_h // 8)
+            ao_c = (max(r-62, 0), max(g-56, 0), max(b-48, 0))
             pygame.draw.rect(surf, ao_c, (col_i, top, 1, ao_h))
             pygame.draw.rect(surf, ao_c, (col_i, top + wall_h - ao_h, 1, ao_h))
+            # Vine creep at wall top (some columns)
+            vine_seed = (col_i * 31 + int(hit_frac * 200)) % 100
+            if vine_seed < 12 and wall_h > 20:
+                vine_len = max(1, wall_h // 6)
+                vine_c = (int(VINE_C[0] * shade_q),
+                          int(VINE_C[1] * shade_q),
+                          int(VINE_C[2] * shade_q))
+                pygame.draw.rect(surf, vine_c, (col_i, top, 1, vine_len))
 
     # ── Enemy sprites ──
     living = [(e, math.hypot(e.x-player.x, e.y-player.y)) for e in enemies if e.alive]
@@ -393,11 +441,11 @@ def draw_view(surf, player, enemies, zbuf, t):
 
         sshade   = max(0.15, 1.0 - corr_d / MAX_D)
         is_hit   = e.flash % 4 < 2 and e.flash > 0
-        skin_raw = (255, 80, 80) if is_hit else (180, 165, 142)
+        skin_raw = (255, 80, 80) if is_hit else (72, 145, 68)
         skin_col = tuple(int(c * sshade) for c in skin_raw)
-        robe_col = tuple(int(c * sshade) for c in (26, 22, 18))
-        robe_drk = tuple(int(c * sshade) for c in (12, 10, 8))
-        eye_col  = (min(int(215*sshade), 255), min(int(75*sshade), 255), 0)
+        robe_col = tuple(int(c * sshade) for c in (38, 52, 34))
+        robe_drk = tuple(int(c * sshade) for c in (18, 28, 16))
+        eye_col  = (min(int(240*sshade), 255), min(int(200*sshade), 255), min(int(20*sshade), 255))
 
         bx_ = max(sx, 0)
         by_ = sy + proj_h // 3
@@ -423,8 +471,9 @@ def draw_view(surf, player, enemies, zbuf, t):
         hwc    = min(head_w, RW - hxc)
         if hwc > 0 and head_h > 0:
             pygame.draw.rect(surf, skin_col, (hxc, hy_, hwc, head_h))
-            hood = tuple(max(c-70, 0) for c in skin_col)
-            pygame.draw.rect(surf, hood, (hxc, hy_, hwc, head_h // 2))
+            # Darker scalp / brow ridge
+            hood = tuple(max(c-50, 0) for c in skin_col)
+            pygame.draw.rect(surf, hood, (hxc, hy_, hwc, max(1, head_h // 3)))
             if head_w > 3 and head_h > 2:
                 ew2  = max(1, head_w // 5)
                 ehy2 = hy_ + head_h * 2 // 3
@@ -447,7 +496,7 @@ def draw_view(surf, player, enemies, zbuf, t):
                 for si in range(segs):
                     sxs = bxh + si * segw
                     if sxs < 0 or sxs >= RW: continue
-                    sc_ = (180, 40, 40) if si < filled else (26, 8, 8)
+                    sc_ = (60, 180, 60) if si < filled else (14, 28, 14)
                     pygame.draw.rect(surf, sc_, (sxs, bby, max(1, segw-1), bh_h))
 
     # ── Torch sprites ──
@@ -473,18 +522,30 @@ def draw_view(surf, player, enemies, zbuf, t):
 
         stick_x = max(0, stx + proj_wt // 4)
         stick_w = max(1, proj_wt // 2)
-        pygame.draw.rect(surf, (72, 46, 18),
+        # Iron bracket
+        pygame.draw.rect(surf, (42, 38, 48),
+            (stick_x - max(1, stick_w), sty + proj_ht//2, stick_w * 3, max(1, proj_ht//8)))
+        # Wooden stick
+        pygame.draw.rect(surf, (62, 40, 16),
             (stick_x, sty + proj_ht//2, stick_w, max(1, proj_ht//2)))
 
         flame_h = max(1, proj_ht // 2)
+        # Determine torch type based on position for variety
+        is_green_torch = (tc + tr) % 3 == 0
         for fi in range(flame_h):
             ratio = fi / max(flame_h, 1)
-            fr    = min(255, int(255 * flick_v))
-            fg    = min(255, int((128 - 80*ratio) * flick_v))
-            fw    = max(1, int(proj_wt * (1.0 - ratio * 0.55)))
-            fxs   = stx + (proj_wt - fw) // 2
+            if is_green_torch:
+                fr = min(255, int((40 + 60 * ratio) * flick_v))
+                fg = min(255, int((220 - 100*ratio) * flick_v))
+                fb = min(255, int((80 - 40*ratio) * flick_v))
+            else:
+                fr = min(255, int(255 * flick_v))
+                fg = min(255, int((140 - 90*ratio) * flick_v))
+                fb = min(255, int(18 * flick_v))
+            fw = max(1, int(proj_wt * (1.0 - ratio * 0.55)))
+            fxs = stx + (proj_wt - fw) // 2
             if 0 <= fxs < RW and 0 <= sty + fi < RH:
-                pygame.draw.rect(surf, (fr, fg, 12), (fxs, sty + fi, fw, 1))
+                pygame.draw.rect(surf, (fr, fg, fb), (fxs, sty + fi, fw, 1))
 
     # ── Weapon — large, anchored bottom-right, FPS style ──
     sw_w  = max(8, RW // 5)
@@ -503,30 +564,30 @@ def draw_view(surf, player, enemies, zbuf, t):
     grip_x  = bx_sw + (sw_w - grip_w) // 2
     grip_y  = guard_y + guard_h
 
-    # Blade — aged iron
-    pygame.draw.rect(surf, (105, 100, 88), (blade_x, by_sw, blade_w, blade_h))
-    pygame.draw.rect(surf, (185, 178, 158),
+    # Blade — dark steel with cold sheen
+    pygame.draw.rect(surf, (90, 88, 98), (blade_x, by_sw, blade_w, blade_h))
+    pygame.draw.rect(surf, (160, 165, 178),
         (blade_x + blade_w//3, by_sw + 2, max(1, blade_w//3), blade_h - 4))
-    pygame.draw.rect(surf, (58, 54, 46), (blade_x, by_sw, 1, blade_h))
-    pygame.draw.rect(surf, (58, 54, 46), (blade_x + blade_w - 1, by_sw, 1, blade_h))
+    pygame.draw.rect(surf, (48, 46, 54), (blade_x, by_sw, 1, blade_h))
+    pygame.draw.rect(surf, (48, 46, 54), (blade_x + blade_w - 1, by_sw, 1, blade_h))
 
-    # Cross-guard — bronze
+    # Cross-guard — dark iron with purple tint
     gw = sw_w
-    pygame.draw.rect(surf, (95, 72, 32),   (bx_sw, guard_y, gw, guard_h))
-    pygame.draw.rect(surf, (138, 104, 48), (bx_sw, guard_y, gw, 2))
-    pygame.draw.rect(surf, (50, 36, 14),   (bx_sw, guard_y + guard_h - 2, gw, 2))
+    pygame.draw.rect(surf, (72, 58, 48),   (bx_sw, guard_y, gw, guard_h))
+    pygame.draw.rect(surf, (110, 90, 72), (bx_sw, guard_y, gw, 2))
+    pygame.draw.rect(surf, (38, 30, 24),   (bx_sw, guard_y + guard_h - 2, gw, 2))
 
-    # Grip — dark leather
-    pygame.draw.rect(surf, (58, 36, 16), (grip_x, grip_y, grip_w, grip_h))
+    # Grip — dark leather with purple wrap
+    pygame.draw.rect(surf, (42, 28, 32), (grip_x, grip_y, grip_w, grip_h))
     wrap_step = max(2, grip_h // 4)
     for gi in range(0, grip_h, wrap_step):
-        pygame.draw.line(surf, (36, 22, 8),
+        pygame.draw.line(surf, (28, 18, 22),
             (grip_x, grip_y+gi), (grip_x+grip_w, grip_y+gi), 1)
 
-    # Pommel
+    # Pommel — skull-shaped dark iron
     pom_w = grip_w + 4
     pom_h = max(3, grip_h // 3)
-    pygame.draw.rect(surf, (110, 82, 36), (grip_x - 2, grip_y + grip_h, pom_w, pom_h))
+    pygame.draw.rect(surf, (82, 74, 68), (grip_x - 2, grip_y + grip_h, pom_w, pom_h))
 
     # ── Damage flash vignette ──
     if player.flash > 0:
@@ -538,7 +599,7 @@ def draw_view(surf, player, enemies, zbuf, t):
 
 # ── draw_hud_panel ────────────────────────────────────────────────────────────
 def draw_hud_panel(surf, player, buttons, font, sfont):
-    pygame.draw.rect(surf, (8, 9, 10), (0, VIEW_H, SW, HUD_H))
+    pygame.draw.rect(surf, (10, 8, 16), (0, VIEW_H, SW, HUD_H))
     pygame.draw.line(surf, BTN_BD, (0, VIEW_H),   (SW, VIEW_H),   3)
     pygame.draw.line(surf, BTN_HL, (0, VIEW_H+3), (SW, VIEW_H+3), 1)
     for cx_, cy_ in [(0, VIEW_H), (SW-8, VIEW_H)]:
@@ -552,7 +613,7 @@ def draw_hud_panel(surf, player, buttons, font, sfont):
     sc      = font.render(sc_text, True, GOLD)
     sc_x    = SW//2 - sc.get_width()//2
     sc_y    = VIEW_H + 8
-    pygame.draw.rect(surf, (4, 5, 6),
+    pygame.draw.rect(surf, (6, 4, 10),
         (sc_x - 8, sc_y - 3, sc.get_width() + 16, sc.get_height() + 6))
     pygame.draw.rect(surf, BTN_BD,
         (sc_x - 8, sc_y - 3, sc.get_width() + 16, sc.get_height() + 6), 2)
@@ -567,10 +628,10 @@ def draw_hud_panel(surf, player, buttons, font, sfont):
     mm_w  = mm_s * MAP_W
     mm_h  = mm_s * MAP_H
 
-    pygame.draw.rect(surf, (4, 5, 6), (mm_x - 3, mm_y - 3, mm_w + 6, mm_h + 6))
+    pygame.draw.rect(surf, (6, 4, 10), (mm_x - 3, mm_y - 3, mm_w + 6, mm_h + 6))
     for ry in range(MAP_H):
         for rx in range(MAP_W):
-            col = (58, 62, 66) if MAP[ry][rx] == '#' else (14, 15, 16)
+            col = (52, 48, 64) if MAP[ry][rx] == '#' else (14, 12, 20)
             pygame.draw.rect(surf, col, (mm_x + rx*mm_s, mm_y + ry*mm_s, mm_s, mm_s))
 
     for tc_, tr_ in TORCHES:
@@ -623,7 +684,7 @@ def game_over_screen(surf, font, bfont, score):
     box_y = SH//2 - 100
     box_w = t1.get_width() + 40
     box_h = 130
-    pygame.draw.rect(surf, (14, 4, 4),  (box_x, box_y, box_w, box_h))
+    pygame.draw.rect(surf, (18, 4, 10),  (box_x, box_y, box_w, box_h))
     pygame.draw.rect(surf, RED_LT,      (box_x, box_y, box_w, box_h), 3)
     pygame.draw.rect(surf, (65, 16, 16),(box_x+3, box_y+3, box_w-6, box_h-6), 1)
 
